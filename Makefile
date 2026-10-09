@@ -39,11 +39,13 @@ restart: ## Restart the stack
 logs: ## Follow logs for all services
 	$(COMPOSE) logs -f --tail=100
 
-ps status: ## Show container and endpoint status
+status: ## Show container status plus the Elasticsearch and Kibana URLs
 	@$(COMPOSE) ps
 	@set -a; source .env; set +a; \
 	echo; echo "Elasticsearch: http://$$ES_BIND_ADDR:9200"; \
 	echo "Kibana:        http://$$KIBANA_BIND_ADDR:5601  (user: elastic)"
+
+ps: status ## Alias for status
 
 verify: ## Run end-to-end pipeline checks (use this for your screenshots)
 	@./scripts/verify-stack.sh

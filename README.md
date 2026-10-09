@@ -34,6 +34,9 @@ images/elasticsearch/        Dockerfile + baked elasticsearch.yml
 images/kibana/               Dockerfile + baked kibana.yml
 provision/                   ingest pipeline, roles, setup.sh (runs in-container)
 scripts/deploy-server.sh     one-command SOC server deployment
+scripts/doctor.sh            full pipeline health check with fix suggestions
+scripts/fix-shipper.sh       repair Beats keystore credentials
+scripts/install-filebeat.sh  install + wire up Filebeat on this host
 scripts/                     bootstrap, verification, Kibana provisioning, samples
 endpoint/install-endpoint.sh one-command SOC endpoint deployment
 endpoint/                    Auditbeat/Filebeat configs, audit rules
@@ -116,7 +119,89 @@ Then in Kibana at `http://<soc-server-tailscale-ip>:5601`, search Discover for:
 soc.rule_key : "soc_file_monitor"
 ```
 
-Run `make help` for every target.
+## Command reference
+
+Every command runs from the repository root. `make help` prints this same list.
+
+### Start here when something is wrong
+
+`make doctor` is the single most useful command in the repo. It walks all eight links in the pipeline, reports pass/warn/fail for each, and prints the exact command that fixes every failure it finds. Every check in it exists because that thing actually broke during a real deployment.
+
+```bash
+make doctor          # diagnose
+make doctor-e2e      # diagnose, then generate a live event and trace it end to end
+```
+
+### Deployment and lifecycle
+
+| Command | What it does | When to use it |
+| --- | --- | --- |
+| `make deploy` | Full server deployment: preflight → credentials → build → start → provision → verify | First run on `soc-server`, and any time you want a clean, checked rebuild |
+| `make init` | Generate `.env` only (random passwords, Tailscale auto-detect) | You want credentials without starting anything |
+| `make build` | Build the two images | After editing anything under `images/` |
+| `make up` | Start Elasticsearch, provisioning, Kibana | Daily start; after `make down` |
+| `make down` | Stop containers, **keep** indexed data | Finished for the session; frees RAM/CPU |
+| `make restart` | Restart containers in place | After changing environment values in `docker-compose.yml` |
+| `make status` | Container state plus the Elasticsearch and Kibana URLs | Quick "is it up, and what address do I browse to?" |
+| `make logs` | Follow all container logs | Watching a startup problem as it happens |
+| `make clean` | Stop and remove the built images, keep data | Reclaim disk, force a full image rebuild |
+| `make destroy` | Stop and **delete the data volume and images** | Start completely fresh. Irreversible — all indexed events are gone |
+
+### Diagnosis
+
+| Command | What it does | When to use it |
+| --- | --- | --- |
+| `make doctor` | 8-section health check with a fix hint per failure | **First response to any problem** |
+| `make doctor-e2e` | Doctor plus a live event, polled until it lands or times out | "My events aren't showing up in Kibana" |
+| `make verify` | Raw end-to-end output: ES response, pipeline, indices, counts, listeners | Producing screenshots and evidence for the report |
+| `make events` | Index list plus the 5 most recent events carrying `soc.rule_key` | Quick "did my test event actually land?" |
+| `make audit-check` | Writes a file from a freshly forked process and confirms auditd recorded it | Endpoint generates no events; rules out the blind-shell trap |
+| `make shipper-status` | Whether Auditbeat/Filebeat are installed and active | Fast endpoint sanity check |
+| `make shipper-logs` | Tails the Beats `.ndjson` log files | Beats log to files, **not** journald — `journalctl` shows almost nothing |
+| `make pipeline-test` | Runs the ingest pipeline simulator on a sample document | After editing `provision/ingest-pipeline.json` |
+| `make passwords` | Prints the generated credentials | Installing the endpoint, or logging into Kibana |
+
+### Repair
+
+| Command | What it does | When to use it |
+| --- | --- | --- |
+| `make fix` | Runs `fix-roles` then `fix-shipper` | You don't know which layer broke; safe to run anytime |
+| `make fix-roles` | Re-applies Elasticsearch roles and users from `provision/` | `403 unauthorized` in Beats logs, or `onConnect callback failed` / `lifecycle policy creation failed` |
+| `make fix-shipper` | Re-pushes the password from `.env` into every Beats keystore and restarts them | `401 Unauthorized` from a shipper — usually a bad paste of the password |
+
+### Endpoint shippers
+
+| Command | What it does | When to use it |
+| --- | --- | --- |
+| `make endpoint-bundle` | Creates `endpoint-setup.tar.gz` to copy to the endpoint | The endpoint is a **separate** machine |
+| `make filebeat` | Installs, configures, chains and starts Filebeat on this host | Single-machine setup, and you want auth/syslog collection too |
+| `make filebeat-syslog-only` | Same, but with the auditd module disabled | Avoids indexing every audit event twice (once via Auditbeat, once via Filebeat) |
+| `make chain-filebeat` | Appends `soc-lab-normalize` to Filebeat's auditd module pipeline | After any `filebeat setup --pipelines`; without it Filebeat events have no `soc.rule_key` |
+
+### Kibana and data
+
+| Command | What it does | When to use it |
+| --- | --- | --- |
+| `make provision` | Creates data views and the stack alerting rule | After the first events arrive (data views need a matching index) |
+| `make provision-security` | Also creates the Elastic Security detection rule | Assignment Part 17 |
+| `make sample` | Indexes synthetic audit events through the real pipeline | Prove the server works **before** touching the endpoint |
+
+### Symptom → command
+
+| Symptom | Run this |
+| --- | --- |
+| Anything at all is wrong | `make doctor` |
+| No events in Kibana | `make doctor-e2e` |
+| Shipper log shows `401 Unauthorized` | `make fix-shipper` |
+| Shipper log shows `lifecycle policy ... failed` or `onConnect callback failed` | `make fix-roles` |
+| Endpoint produces no audit records | `make audit-check` |
+| Kibana shows "no data views" | `make sample` then `make provision` |
+| Filebeat events missing `soc.rule_key` | `make chain-filebeat` |
+| Elasticsearch keeps restarting (exit 137) | `./scripts/deploy-server.sh --heap 1g` |
+| Endpoint can't reach port 9200 | `./scripts/deploy-server.sh --bind $(tailscale ip -4)` |
+| Need credentials | `make passwords` |
+| Need screenshots for the report | `make verify` |
+| Want to start over completely | `make destroy` then `make deploy` |
 
 ## Where Logstash went
 
