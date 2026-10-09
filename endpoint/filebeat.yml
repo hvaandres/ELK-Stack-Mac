@@ -1,0 +1,73 @@
+# ===========================================================================
+# Filebeat configuration for soc-endpoint (SOC Lab Part 3) - ALTERNATIVE to
+# Auditbeat, or run alongside it.
+#
+# Data path:  auditd -> /var/log/audit/audit.log -> Filebeat auditd module
+#             -> Elasticsearch (module ingest pipeline) -> filebeat-* -> Kibana
+#
+# IMPORTANT: unlike Auditbeat, the Filebeat auditd module ships raw log lines
+# and relies on its OWN Elasticsearch ingest pipeline to parse them. That means
+# you must NOT set `output.elasticsearch.pipeline` here - doing so replaces the
+# module pipeline and your events arrive unparsed.
+#
+# To also run the SOC normalization, chain it onto the module pipeline once,
+# from soc-server:
+#     ./scripts/chain-filebeat-pipeline.sh
+#
+# With the Filebeat path the audit rule key lands in `auditd.log.key`
+# (Auditbeat puts it in `tags`). The chained pipeline normalizes both into
+# `soc.rule_key`.
+# ===========================================================================
+
+name: soc-endpoint
+tags: ["soc-lab", "part3"]
+
+filebeat.modules:
+  - module: auditd
+    log:
+      enabled: true
+      var.paths: ["/var/log/audit/audit.log*"]
+
+  # System authentication/authorization logs give you login context for the
+  # investigation (who was on the box when the file changed).
+  - module: system
+    auth:
+      enabled: true
+    syslog:
+      enabled: true
+
+processors:
+  - add_host_metadata:
+      netinfo.enabled: true
+  - add_fields:
+      target: soc
+      fields:
+        role: endpoint
+        lab: part3-centralized-monitoring
+
+output.elasticsearch:
+  hosts: ["http://__SOC_SERVER_IP__:9200"]
+  protocol: "http"
+  username: "soc-beats"
+  # From the keystore: sudo filebeat keystore add BEATS_PASSWORD
+  password: "${BEATS_PASSWORD}"
+  max_retries: -1
+  backoff.init: 1s
+  backoff.max: 60s
+  # Deliberately NOT setting `pipeline:` - see the note at the top of the file.
+
+setup.kibana:
+  host: "http://__SOC_SERVER_IP__:5601"
+
+setup.template.enabled: true
+setup.ilm.enabled: true
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat
+  keepfiles: 7
+  permissions: 0640
+
+monitoring.enabled: false

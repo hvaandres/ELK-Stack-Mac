@@ -1,0 +1,27 @@
+# Static Elasticsearch config for the SOC lab.
+# Anything secret or host-specific is supplied as an environment variable in
+# docker-compose.yml, not here.
+
+cluster.name: soc-lab
+
+# Listen on all container interfaces; the host port publish in compose decides
+# which real interface (loopback / Tailscale) is actually reachable.
+network.host: 0.0.0.0
+http.port: 9200
+
+# Single-node lab: no cross-node transport, no replicas to allocate.
+# discovery.type is set via the environment in docker-compose.yml.
+
+# Security: authentication is ON (realistic), HTTPS is OFF inside the Docker
+# network to keep the lab focused on the SOC pipeline. Confidentiality on the
+# wire is provided by Tailscale (WireGuard) between soc-endpoint and soc-server.
+xpack.security.enabled: true
+xpack.security.http.ssl.enabled: false
+xpack.security.transport.ssl.enabled: false
+
+# Keep the footprint small on a 2-4 GB lab VM and avoid outbound calls on boot.
+xpack.ml.enabled: false
+ingest.geoip.downloader.enabled: false
+
+# Safety: require an explicit index name for destructive operations.
+action.destructive_requires_name: true

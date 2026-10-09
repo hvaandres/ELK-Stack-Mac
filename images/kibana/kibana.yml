@@ -1,0 +1,21 @@
+# Static Kibana config for the SOC lab.
+# Credentials, public URL and encryption keys come from the environment.
+
+server.name: soc-kibana
+
+# Bind inside the container to all interfaces. The published port in
+# docker-compose.yml (KIBANA_BIND_ADDR) controls which host interface -
+# loopback or the Tailscale address - actually exposes the UI.
+server.host: "0.0.0.0"
+server.port: 5601
+
+elasticsearch.hosts: ["http://elasticsearch:9200"]
+
+# Useful for the lab: longer timeout while Elasticsearch warms up on a small VM.
+elasticsearch.requestTimeout: 60000
+
+# Monitoring UI knows it is running in a container.
+monitoring.ui.container.elasticsearch.enabled: true
+
+telemetry.optIn: false
+telemetry.enabled: false

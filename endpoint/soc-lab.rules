@@ -1,0 +1,35 @@
+# ===========================================================================
+# SOC Lab audit rules (soc-endpoint)
+#
+# Install to:  /etc/audit/rules.d/soc-lab.rules
+# Apply with:  sudo augenrules --load  (or: sudo systemctl restart auditd)
+# Verify with: sudo auditctl -l
+#
+# __SOC_LAB_DIR__ is replaced by install-endpoint.sh with the lab directory
+# you created in Part 2 (for example /home/student/soc-lab).
+# ===========================================================================
+
+# --- Part 2 rule: writes and attribute changes in the SOC lab directory ----
+-w __SOC_LAB_DIR__ -p wa -k soc_file_monitor
+
+# --- Identity / account changes -------------------------------------------
+-w /etc/passwd  -p wa -k soc_identity
+-w /etc/shadow  -p wa -k soc_identity
+-w /etc/group   -p wa -k soc_identity
+-w /etc/sudoers -p wa -k soc_identity
+-w /etc/sudoers.d/ -p wa -k soc_identity
+
+# --- Privilege escalation tooling -----------------------------------------
+-w /usr/bin/sudo -p x -k soc_privilege
+-w /bin/su       -p x -k soc_privilege
+
+# --- SSH configuration ------------------------------------------------------
+-w /etc/ssh/sshd_config -p wa -k soc_ssh_config
+
+# --- Scheduled task persistence -------------------------------------------
+-w /etc/crontab    -p wa -k soc_persistence
+-w /etc/cron.d/    -p wa -k soc_persistence
+-w /var/spool/cron/ -p wa -k soc_persistence
+
+# Keep this ruleset small and intentional. Every rule you add increases event
+# volume; in a real SOC that is storage cost and analyst noise.

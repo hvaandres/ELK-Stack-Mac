@@ -1,0 +1,109 @@
+# ===========================================================================
+# Auditbeat configuration for soc-endpoint (SOC Lab Part 3)
+#
+# Data path:  auditd (kernel)  ->  Auditbeat  ->  Elasticsearch ingest
+#             pipeline "soc-lab-normalize"  ->  auditbeat-* index  ->  Kibana
+#
+# There is no Logstash hop. Auditbeat already emits ECS-normalized documents,
+# and the remaining normalization/enrichment is done by the Elasticsearch
+# ingest pipeline configured below.
+#
+# Install:  sudo ./install-endpoint.sh <SOC_SERVER_TAILSCALE_IP>
+# ===========================================================================
+
+name: soc-endpoint
+tags: ["soc-lab", "part3"]
+
+# ---------------------------------------------------------------------------
+# Modules
+# ---------------------------------------------------------------------------
+auditbeat.modules:
+
+  # The auditd service installed in Part 2 owns the rules in
+  # /etc/audit/rules.d/. Using the multicast socket lets Auditbeat read a
+  # broadcast copy of the same kernel events WITHOUT fighting auditd for the
+  # unicast netlink socket.
+  #
+  # The audit rule key (-k soc_file_monitor) arrives in the event's `tags`
+  # field; the ingest pipeline copies it to `soc.rule_key`.
+  - module: auditd
+    socket_type: multicast
+    resolve_ids: true
+    failure_mode: silent
+    backlog_limit: 8192
+    rate_limit: 0
+
+    # If you would rather let Auditbeat own the rules instead of auditd:
+    #   1. sudo systemctl disable --now auditd
+    #   2. comment out `socket_type: multicast` above
+    #   3. uncomment the audit_rule_files line below
+    # audit_rule_files: ['${path.config}/audit.rules.d/*.conf']
+
+  # File integrity monitoring adds a second, independent source of truth about
+  # the monitored directory - useful when correlating during an investigation.
+  - module: file_integrity
+    paths:
+      - /etc
+      - /bin
+      - /usr/bin
+      - /sbin
+      - /usr/sbin
+      # Replace with the lab directory created in Part 2 if it differs.
+      - /home/__SOC_LAB_USER__/soc-lab
+
+# ---------------------------------------------------------------------------
+# Processors: cheap local enrichment before the event leaves the endpoint
+# ---------------------------------------------------------------------------
+processors:
+  - add_host_metadata:
+      netinfo.enabled: true
+  - add_process_metadata:
+      match_pids: ["process.pid"]
+      ignore_missing: true
+  - add_fields:
+      target: soc
+      fields:
+        role: endpoint
+        lab: part3-centralized-monitoring
+
+# ---------------------------------------------------------------------------
+# Output: directly to Elasticsearch on soc-server (over Tailscale)
+#
+# The password comes from the Beats keystore, NOT from this file:
+#   sudo auditbeat keystore create
+#   sudo auditbeat keystore add BEATS_PASSWORD
+# ---------------------------------------------------------------------------
+output.elasticsearch:
+  hosts: ["http://__SOC_SERVER_IP__:9200"]
+  protocol: "http"
+  username: "soc-beats"
+  password: "${BEATS_PASSWORD}"
+
+  # This is where the "Logstash work" happens now.
+  pipeline: "soc-lab-normalize"
+
+  # Retry forever rather than dropping security telemetry if soc-server blips.
+  max_retries: -1
+  backoff.init: 1s
+  backoff.max: 60s
+
+# Kibana endpoint, used only by `auditbeat setup` to load index templates and
+# the prebuilt dashboards.
+setup.kibana:
+  host: "http://__SOC_SERVER_IP__:5601"
+
+setup.template.enabled: true
+setup.ilm.enabled: true
+
+# ---------------------------------------------------------------------------
+# Local logging - useful for the "is the shipper working?" troubleshooting step
+# ---------------------------------------------------------------------------
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/auditbeat
+  name: auditbeat
+  keepfiles: 7
+  permissions: 0640
+
+monitoring.enabled: false

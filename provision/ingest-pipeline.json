@@ -1,0 +1,96 @@
+{
+  "description": "SOC Lab Part 3 - normalization and enrichment for endpoint audit telemetry. This pipeline performs the processing work that Logstash would have done in the classic ELK pipeline, but inside Elasticsearch (Beats -> Elasticsearch ingest node -> index).",
+  "processors": [
+    {
+      "set": {
+        "field": "event.ingested",
+        "value": "{{{_ingest.timestamp}}}",
+        "ignore_failure": true
+      }
+    },
+    {
+      "script": {
+        "description": "Normalize the auditd rule key (-k) into soc.rule_key regardless of which shipper produced the event. Auditbeat puts the rule key in tags[]; Filebeat's auditd module puts it in auditd.log.key.",
+        "lang": "painless",
+        "source": "def key = null;\nif (ctx.auditd != null) {\n  if (ctx.auditd.log != null && ctx.auditd.log.key != null) { key = ctx.auditd.log.key; }\n  else if (ctx.auditd.data != null && ctx.auditd.data.key != null) { key = ctx.auditd.data.key; }\n}\nif (key == null && ctx.tags instanceof List) {\n  for (def t : ctx.tags) {\n    if (t instanceof String && ((String) t).startsWith('soc_')) { key = t; break; }\n  }\n}\nif (key != null) {\n  if (ctx.soc == null) { ctx.soc = new HashMap(); }\n  ctx.soc.rule_key = key;\n}",
+        "ignore_failure": true
+      }
+    },
+    {
+      "set": {
+        "field": "soc.lab",
+        "value": "part3-centralized-monitoring",
+        "ignore_failure": true
+      }
+    },
+    {
+      "set": {
+        "field": "soc.pipeline",
+        "value": "beats -> elasticsearch ingest pipeline -> index",
+        "ignore_failure": true
+      }
+    },
+    {
+      "set": {
+        "field": "event.outcome",
+        "value": "success",
+        "if": "ctx.event?.outcome == null && ctx.auditd?.result == 'success'",
+        "ignore_failure": true
+      }
+    },
+    {
+      "set": {
+        "field": "event.outcome",
+        "value": "failure",
+        "if": "ctx.event?.outcome == null && ctx.auditd?.result == 'fail'",
+        "ignore_failure": true
+      }
+    },
+    {
+      "set": {
+        "field": "soc.severity",
+        "value": "medium",
+        "if": "ctx.soc?.rule_key == 'soc_file_monitor'",
+        "ignore_failure": true
+      }
+    },
+    {
+      "set": {
+        "field": "soc.severity",
+        "value": "high",
+        "if": "ctx.soc?.rule_key == 'soc_identity'",
+        "ignore_failure": true
+      }
+    },
+    {
+      "append": {
+        "field": "tags",
+        "value": ["soc-lab"],
+        "allow_duplicates": false,
+        "ignore_failure": true
+      }
+    },
+    {
+      "trim": {
+        "field": "process.title",
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    }
+  ],
+  "on_failure": [
+    {
+      "append": {
+        "field": "tags",
+        "value": ["soc-pipeline-error"],
+        "allow_duplicates": false
+      }
+    },
+    {
+      "set": {
+        "field": "error.message",
+        "value": "{{{_ingest.on_failure_message}}}"
+      }
+    }
+  ]
+}

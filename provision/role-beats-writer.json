@@ -1,0 +1,21 @@
+{
+  "cluster": [
+    "monitor",
+    "read_ilm",
+    "read_pipeline"
+  ],
+  "indices": [
+    {
+      "names": ["auditbeat-*", "filebeat-*", "metricbeat-*"],
+      "privileges": [
+        "auto_configure",
+        "create_doc",
+        "create_index",
+        "view_index_metadata"
+      ]
+    }
+  ],
+  "metadata": {
+    "description": "Runtime-only role for Auditbeat/Filebeat shipping from soc-endpoint. Deliberately WITHOUT the index 'manage' privilege: with it, anyone who compromises the endpoint could DELETE the SOC's own evidence indices. Also without manage_ilm / manage_index_templates - index templates and ILM policies are installed once, by the elastic user, via 'beat setup --index-management' in endpoint/install-endpoint.sh."
+  }
+}

@@ -1,0 +1,106 @@
+name: soc-lab
+
+services:
+  # ---------------------------------------------------------------------
+  # Elasticsearch - storage, indexing and search engine for security data
+  # ---------------------------------------------------------------------
+  elasticsearch:
+    build:
+      context: ./images/elasticsearch
+      args:
+        STACK_VERSION: ${STACK_VERSION:-9.5.5}
+    image: soc-lab/elasticsearch:${STACK_VERSION:-9.5.5}
+    container_name: soc-elasticsearch
+    environment:
+      node.name: soc-es01
+      discovery.type: single-node
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?ELASTIC_PASSWORD is required - run ./scripts/bootstrap-env.sh}
+      xpack.license.self_generated.type: ${LICENSE:-basic}
+      bootstrap.memory_lock: "true"
+      ES_JAVA_OPTS: -Xms${ES_HEAP:-1g} -Xmx${ES_HEAP:-1g}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    ports:
+      # Only reachable on the interface you choose in .env (loopback by default,
+      # the Tailscale IP once the endpoint needs to ship events).
+      - "${ES_BIND_ADDR:-127.0.0.1}:9200:9200"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -u "elastic:$${ELASTIC_PASSWORD}"
+          'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' >/dev/null
+      interval: 10s
+      timeout: 10s
+      retries: 40
+      start_period: 45s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------
+  # One-shot provisioning: passwords, ingest pipeline (the Logstash
+  # replacement), shipper role/user and the analyst role.
+  # ---------------------------------------------------------------------
+  setup:
+    image: soc-lab/elasticsearch:${STACK_VERSION:-9.5.5}
+    container_name: soc-setup
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      ES_URL: http://elasticsearch:9200
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?}
+      KIBANA_SYSTEM_PASSWORD: ${KIBANA_SYSTEM_PASSWORD:?}
+      BEATS_PASSWORD: ${BEATS_PASSWORD:?}
+      ANALYST_PASSWORD: ${ANALYST_PASSWORD:-}
+    volumes:
+      - ./provision:/provision:ro
+    user: root
+    entrypoint: ["/bin/bash", "/provision/setup.sh"]
+    restart: "no"
+
+  # ---------------------------------------------------------------------
+  # Kibana - the analyst interface: Discover, visualizations, alerting
+  # ---------------------------------------------------------------------
+  kibana:
+    build:
+      context: ./images/kibana
+      args:
+        STACK_VERSION: ${STACK_VERSION:-9.5.5}
+    image: soc-lab/kibana:${STACK_VERSION:-9.5.5}
+    container_name: soc-kibana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      setup:
+        condition: service_completed_successfully
+    environment:
+      ELASTICSEARCH_HOSTS: '["http://elasticsearch:9200"]'
+      ELASTICSEARCH_USERNAME: kibana_system
+      ELASTICSEARCH_PASSWORD: ${KIBANA_SYSTEM_PASSWORD:?}
+      SERVER_PUBLICBASEURL: ${KIBANA_PUBLIC_URL:-http://127.0.0.1:5601}
+      # Required for alerting / detection rules to persist encrypted state.
+      XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY: ${KIBANA_ENCRYPTION_KEY:?}
+      XPACK_REPORTING_ENCRYPTIONKEY: ${REPORTING_ENCRYPTION_KEY:?}
+      XPACK_SECURITY_ENCRYPTIONKEY: ${SECURITY_ENCRYPTION_KEY:?}
+    ports:
+      - "${KIBANA_BIND_ADDR:-127.0.0.1}:5601:5601"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:5601/api/status | grep -q '"level":"available"'
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 90s
+    restart: unless-stopped
+
+volumes:
+  esdata:
+    name: soc-lab-esdata
