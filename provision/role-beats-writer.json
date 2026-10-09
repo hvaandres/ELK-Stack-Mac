@@ -2,6 +2,8 @@
   "cluster": [
     "monitor",
     "read_ilm",
+    "manage_ilm",
+    "manage_index_templates",
     "read_pipeline"
   ],
   "indices": [
@@ -16,6 +18,7 @@
     }
   ],
   "metadata": {
-    "description": "Runtime-only role for Auditbeat/Filebeat shipping from soc-endpoint. Deliberately WITHOUT the index 'manage' privilege: with it, anyone who compromises the endpoint could DELETE the SOC's own evidence indices. Also without manage_ilm / manage_index_templates - index templates and ILM policies are installed once, by the elastic user, via 'beat setup --index-management' in endpoint/install-endpoint.sh."
+    "note_ilm": "Beats perform index-template and lifecycle setup on EVERY connect, not just during 'beat setup'. Without these two cluster privileges the output connection fails with 'onConnect callback failed' and the shipper silently delivers nothing.",
+    "note_indices": "Index 'manage' is deliberately excluded so a compromised endpoint cannot delete the SOC's own evidence indices. Verify with: curl -u soc-beats:PW -XDELETE <es>/auditbeat-test  -> expect 403"
   }
 }

@@ -160,4 +160,3 @@ Elasticsearch wants memory. `ES_HEAP=1g` suits a 2–4 GB VM. If the container i
 - [`docs/verification-status.md`](docs/verification-status.md) — **what has actually been tested versus assumed.** Read this before trusting any claim in the other documents.
 
 > Authorized systems only. Everything here is intended for the VMs you built for this course.
-# ELK-Stack-Mac
